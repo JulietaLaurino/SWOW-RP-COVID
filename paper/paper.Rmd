@@ -1,0 +1,748 @@
+---
+title: "The pandemic in words: Tracking fast semantic changes via a large-scale word association task" 
+output: html_document
+---
+
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = TRUE)
+#options(scipen=999)
+#library("papaja")
+
+```
+
+```{r settings, message=F, warning=F, echo=F}
+
+# Settings
+source('../scripts/settings.R', encoding = 'UTF-8')
+library(tidyverse)
+library(ggplot2)
+library(ggsignif)
+library(patchwork)
+library(lmerTest)
+library(kableExtra)
+library(here)
+```
+
+
+# Method
+
+## Participants
+
+```{r, echo = F, message=F, warning=F}
+
+# Load preprocessing data
+pp_prebalance = read.csv('../data/SWOW/processed/SWOW-RP.PP_covid.csv', encoding = 'UTF-8')
+pp_final_targetCues = read.csv('../data/SWOW/processed/SWOW-RP.R60.targetCues.csv', encoding = 'UTF-8') %>% 
+  group_by(participantID, age, nativeLanguage, gender, education, cov.time) %>% count()
+
+n = pp_prebalance %>% nrow()
+n_female = pp_prebalance %>% filter(gender == 'Fe') %>% nrow()
+n_male = pp_prebalance %>% filter(gender == 'Ma') %>% nrow()
+n_X = pp_prebalance %>% filter(gender == 'X') %>% nrow()
+age_mean = round(mean(pp_prebalance$age), 0)
+age_sd = round(sd(pp_prebalance$age), 0)
+nativeLanguage_ARG_R = round((pp_prebalance %>% filter(nativeLanguage == 'ARG_R') %>% nrow()) / n*100, 0)
+nativeLanguage_URU_R = round((pp_prebalance %>% filter(nativeLanguage == 'URU_R') %>% nrow()) / n*100, 0)
+nativeLanguage_ARG_C = round((pp_prebalance %>% filter(nativeLanguage == 'ARG_C') %>% nrow()) / n*100, 0)
+nativeLanguage_ARG_N = round((pp_prebalance %>% filter(nativeLanguage == 'ARG_N') %>% nrow()) / n*100, 0)
+education_sec = round((pp_prebalance %>% filter(education == 3) %>% nrow()) / n*100, 0)
+education_uni = round((pp_prebalance %>% filter(education == 4) %>% nrow()) / n*100, 0)
+
+# Show pp summary
+library('writexl')
+pp_final_targetCues <- pp_final_targetCues %>% 
+  mutate(gender = replace(gender, gender == 'Fe', 'Female')) %>% 
+  mutate(gender = replace(gender, gender == 'Ma', 'Male'))
+
+N.total_precovid_targetCues = pp_final_targetCues %>% 
+  filter(cov.time == 'precovid') %>% 
+  nrow()
+
+N.total_covid_targetCues = pp_final_targetCues%>% 
+  filter(cov.time == 'covid') %>% 
+  nrow()
+
+participants_table = pp_final_targetCues %>%
+  mutate(education = ifelse(education == 1, 'None',
+                            ifelse(
+                              education == 2,
+                              'Primary',
+                              ifelse(
+                                education == 3,
+                                'Secondary',
+                                ifelse(
+                                  education == 4,
+                                  'University',
+                                  ifelse(education == 5, 'Posgraduate', NA)
+                                )
+                              )
+                            ))) %>%
+  mutate(education = factor(
+    education,
+    levels = c('None', 'Primary', 'Secondary', 'University', 'Posgraduate')
+  )) %>%
+  mutate(cov.time = ifelse(
+    cov.time == 'precovid',
+    'Precovid',
+    ifelse(cov.time == 'covid', 'Covid', NA)
+  )) %>%
+  mutate(cov.time = factor(cov.time, levels = c('Precovid', 'Covid'))) %>%
+  mutate(nativeLanguage = ifelse(
+    nativeLanguage == 'ARG_R',
+    'Argentina Rioplatense',
+    ifelse(
+      nativeLanguage == 'URU_R',
+      'Uruguay Rioplatense',
+      ifelse(
+        nativeLanguage == 'ARG_C',
+        'Argentina Cordobés',
+        ifelse(nativeLanguage == 'ARG_N', 'Argentina Nor-oriental-guaraní', NA)
+      )
+    )
+  )) %>%
+  ungroup() %>%
+  select(-participantID, -n) %>%
+  rename(
+    'Native language' = nativeLanguage,
+    Age = age,
+    Education = education,
+    Gender = gender
+  )
+
+library(gtsummary)
+theme_gtsummary_compact()
+t = tbl_summary(
+    participants_table,
+    by = cov.time, # split table by group
+    missing = "no", # dont list missing data separately
+    statistic = list(all_continuous() ~ "{mean} ({sd})"),
+    sort = 'Native language' ~ "frequency",
+    include = c('Gender', 'Age', 'Native language', 'Education')
+  ) %>%
+  modify_header(label = "") %>% # update the column header
+  modify_footnote(everything() ~ NA) %>% 
+  as.tibble() %>% 
+  write_xlsx("./figures_and_tables/table1_demography.xlsx")
+
+```
+
+## Materials
+
+```{r, echo = F, message=F, warning=F}
+
+# Load preprocessing data
+X            = read.table('../data/SWOW/raw/SWOW-RP.complete_covid.csv',
+                          header = TRUE, 
+                          sep = ",", 
+                          dec = ".",
+                          quote = "\"",
+                          stringsAsFactors = FALSE, 
+                          encoding = 'UTF-8')
+targetCues <- read.csv("../data/SWOW/raw/targetCues.csv", 
+                       encoding = 'UTF-8')
+cuesPropertiesByType <- read.csv("../data/SWOW/raw/cuesPropertiesByType.csv", 
+                                 encoding = 'UTF-8')
+
+# Create table
+description = c(
+  'Do not present any evident relationship with the pandemic.',
+  'Incorporated a new sense or modified its more frequent sense since pandemic.',
+    'Related to emotions and that may have been affected during the pandemic.',
+  'Related to aspects of the routine that were affected by the confinement.',
+  'Do not present any evident relationship with the pandemic.'
+)
+examples = c('rain, gasoline, dragon, wheel',
+             'bubble, alcohol, contact, virus',
+             'anxiety, pain, funeral, postpone',
+             'bar, job, tourism, screen',
+             'decade, town, start, basketball')
+
+cuesPropertiesByType$cue.type = factor(cuesPropertiesByType$cue.type,
+                                        levels = c('control',
+                                                   'pandemic',
+                                                   'emotion',
+                                                   'routine'))
+cuesPropertiesByType <- cuesPropertiesByType[order(levels(cuesPropertiesByType$cue.type)),]
+
+cuesPropertiesByType_table = cuesPropertiesByType %>% 
+  select(cue.type, n) %>% 
+  add_row(cue.type = 'filler', n = 180) %>% 
+  rename('Cue type' = cue.type,
+         'N' = n) %>%
+  mutate('Description' = description,
+         'Examples' = examples) %>% 
+  as_tibble() %>% 
+  write_xlsx('./figures_and_tables/table2_targetCues.xlsx')
+
+```
+
+## Data preprocessing
+
+```{r , echo = F, message=F, warning=F}
+
+n = pp_prebalance %>% nrow()
+n_ngram = pp_prebalance %>% filter(prop.nGram > criteria.Ngram) %>% nrow() 
+n_perserver = pp_prebalance %>% filter(prop.Repeat > criteria.Repeat) %>% nrow() 
+n_nonnative = pp_prebalance %>% filter(prop.Rioplatense < criteria.Spanish) %>% nrow()
+n_unknown = pp_prebalance %>% filter(prop.X > criteria.X) %>% nrow() 
+
+responses_targetCues_final = read.csv('../data/SWOW/processed/SWOW-RP.R60.targetCues.csv', encoding = 'UTF-8')
+responses_final = read.csv('../data/SWOW/processed/SWOW-RP.R60_covid.csv', encoding = 'UTF-8')
+
+targetCues_final = unique(responses_targetCues_final$cue)
+
+targetCuesNotAvailable = targetCues %>% filter(cue %in% setdiff(targetCues$cue, targetCues_final))
+
+```
+
+# Results
+
+## Proportion of new responses
+
+```{r , echo=FALSE, message=F, warning=F, include =F}
+
+Response <-
+  read.csv('../data/SWOW/output/responseStats.targetCues.csv',
+           encoding = 'UTF-8') %>%
+  select(-Freq.R1) 
+
+Response <- Response %>%  
+  pivot_wider(names_from = cov.time, values_from = 'Freq.R123') %>%
+  rename('freq_precovid' = precovid, 'freq_covid' = covid) %>%
+  mutate(freq_covid = ifelse(is.na(freq_covid), 0, freq_covid),
+         freq_precovid = ifelse(is.na(freq_precovid), 0, freq_precovid))
+
+translation <-
+  read.csv('../data/SWOW/raw/targetCuesTranslation.csv',
+            encoding = 'UTF-8') %>%
+  rename('cue' = spanish, 'EN' = english) %>%
+  select(cue, EN)
+
+# New responses----
+
+# Create a dataframe for the fig
+Response_mean_new = Response  %>%
+  mutate(freq_new = ifelse(freq_precovid == 0, freq_covid, 0),
+         freq_old = ifelse(freq_new == 0, freq_covid, 0)) %>%
+  group_by(cue, cue.type) %>%
+  summarise(sum_freq_new = sum(freq_new),
+            sum_freq_old = sum(freq_old),
+            total = sum_freq_new + sum_freq_old) %>% 
+  mutate(prop_freq_new = sum_freq_new / total)
+
+Response_mean_new_table = Response_mean_new  %>%
+  filter(cue.type == 'pandemic') %>% 
+  arrange_(~ desc(prop_freq_new)) %>% 
+  left_join(translation) %>% 
+  rename('Cue' = cue) %>% 
+  mutate('Prop. of new responses' = round(prop_freq_new,2),
+         'Cue' = paste0('Cue' = paste0(Cue, " [", EN, "]"))) %>% 
+  head(n = 10) %>% 
+  select(c(Cue, 'Prop. of new responses')) %>%
+  write_xlsx('./figures_and_tables/table4_top_freq_new_appendix.xlsx')
+
+library(knitr)
+library(broom)
+library(emmeans)
+
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+##Cue properties
+#library(lme4)
+
+m_freqNew <-
+  glm(
+    prop_freq_new ~ cue.type,
+    family = binomial,
+    weights = total,
+    Response_mean_new
+  )
+
+summary(m_freqNew)
+drop_m_freqNew = drop1(m_freqNew, test = 'Chisq')
+
+
+#Comparisons
+comp <- emmeans::emmeans(m_freqNew,  ~ cue.type)
+contrast_m_freqNew = as.data.frame(pairs(comp))
+
+## Freq.new plot
+library(ggbeeswarm)
+p1 <-
+  ggplot(Response_mean_new,
+         aes(x = cue.type, y = prop_freq_new, color = cue.type)) +
+  geom_beeswarm(cex = 1.5, alpha = 0.5) +
+  stat_summary(
+    fun.data = mean_se,
+    geom = "errorbar",
+    width = .1,
+    size = .5,
+    color = 'black'
+  ) +
+  stat_summary(fun = mean,
+               geom = "crossbar",
+               width = .6,
+               color = 'black',
+               size = .2) +
+  theme_apa(base_size = 12) +
+  theme(legend.position = 'none',
+        axis.text.x = element_text(),
+        text = element_text(family = 'serif')) +
+  labs(
+    y = 'Proportion of new responses',
+    x = 'Cue type'
+  ) +
+  scale_x_discrete(
+    limits = c("control", "pandemic", "emotion",  "routine"),
+    labels = c("control", "pandemic", "emotion", "routine")
+  ) +
+  geom_signif(
+    comparisons = list(c("control", "pandemic")
+                       ,c("control", "routine")
+                       ),
+    annotations = c("***"
+                    ,'***'
+                    ),
+    y_position = c(0.67
+                   ,0.72
+                   ),
+    tip_length = 0,
+    vjust = 0.4,
+    size = 0.5,
+    textsize = 5,
+    color = 'black'
+  )+
+  coord_cartesian(ylim = c(0.15, 0.8))
+
+p1
+Response_mean_new_table
+ggsave('./figures_and_tables/fig1_freq_new_responses.png', p1)
+
+```
+
+
+## How does the meaning of cues change over time?
+
+```{r , echo=FALSE, message=F, warning=F, include=F}
+
+KL <- read.csv('../data/SWOW/output/cueStats.SWOW-RP.R123.targetCues.csv', encoding = 'UTF-8')
+
+KL_table = KL  %>%
+  filter(cue.type == 'pandemic') %>% 
+  arrange_(~ desc(KL)) %>% 
+  left_join(translation) %>% 
+  rename('Cue' = cue) %>% 
+  mutate('KL' = round(KL,2)) %>% 
+  head(n = 10) %>% 
+  mutate('Cue' = paste0(Cue, " [", EN, "]")) %>% 
+  select(c(Cue, 'KL')) %>%
+  as_tibble() %>% 
+  write_xlsx('./figures_and_tables/table5_top_kl_appendix.xlsx')
+
+library(knitr)
+library(broom)
+library(emmeans)
+
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+
+m_KL <- lm(KL ~ cue.type, KL)
+summary(m_KL)
+
+drop_m_KL = drop1(m_KL, test = 'F')
+effect_size_KL = effectsize::effectsize(aov(KL ~ cue.type, KL))
+
+#Comparisons
+comp <- emmeans::emmeans(m_KL,  ~ cue.type)
+contrast_m_KL = as.data.frame(pairs(comp))
+
+#Assumptions
+# par(mfrow=c(2,2))
+# plot(m_KL)
+# par(mfrow=c(1,1))
+
+## KL plot
+library(ggbeeswarm)
+p1 <- ggplot(KL, aes(x = cue.type, y = KL, color=cue.type)) + 
+  geom_beeswarm(cex = 1.5, alpha = 0.5) +
+  stat_summary(fun.data=mean_se, 
+               geom="errorbar", 
+               width = .1, 
+               size = .5, 
+               color = 'black') +
+  stat_summary(fun=mean, 
+               geom="crossbar", 
+               width = .6, 
+               color = 'black',
+               size = .2) +
+  theme_apa(base_size = 12) +
+  theme(legend.title= element_text(size = 12),
+        axis.text.x = element_text(),
+        text = element_text(family = 'serif')) +
+  scale_x_discrete(limits = c("control", "pandemic", "emotion", "routine"),
+                   labels = c("control", "pandemic", "emotion",  
+                             "routine")) +
+  scale_colour_discrete(guide = 'none')+
+  labs(y = 'KL divergence',
+       x = 'Cue type') +
+  geom_signif(comparisons=list(c("control", "pandemic"),
+                               c('control', 'routine')), 
+              annotations=c("**", '**'),
+              y_position = c(4.55, 4.8), 
+              tip_length = 0, 
+              vjust=0.4, 
+              size = 0.5,
+              textsize = 5,
+              color = 'black') +
+  coord_cartesian(ylim = c(1.4, 5.2))
+
+ggsave('./figures_and_tables/KL_divergence.png', p1)
+
+```
+
+
+## Analyzing semantic shifts through similarity
+
+
+```{r, echo=FALSE, message=F, warning=F, fig.width=5, fig.height=3, include = F}
+translation_with_nns <- read.csv('../data/SWOW/raw/targetCuesTranslation.csv',
+            encoding = 'UTF-8') %>%
+  bind_rows(read.csv('../data/SWOW/raw/nnsTranslation.csv',
+            encoding = 'UTF-8',
+            sep = ';')) %>%
+  rename('cue' = spanish, 'EN' = english) %>% 
+  distinct()
+
+nns_ratio_by_cueType <- read.csv('../data/SWOW/output/nns_ratio.SWOW-RP.csv', encoding = 'UTF-8') %>% 
+  mutate(absdev = abs(1 -ratio)) %>% 
+  arrange(-absdev) %>%
+  left_join(targetCues, by = c('dimension' = 'cue'))
+# 
+nns_ratio_table <- nns_ratio_by_cueType %>% 
+  group_by(dimension, cue.type) %>% 
+  summarise(mean_absdev = mean(absdev)) %>% 
+  filter(cue.type == 'pandemic') %>%
+  arrange_(~ desc(mean_absdev)) %>%
+  left_join(translation_with_nns, by = c('dimension'= 'cue')) %>%
+  rename('Cue' = dimension) %>%
+  mutate("Ratio deviation" = round(mean_absdev,2)) %>%
+  head(n = 10) %>%
+  mutate('Cue' = paste0(Cue, " [", EN, "]")) %>%
+  select(c(Cue, 'Ratio deviation')) %>%
+  as_tibble() %>% 
+  write_xlsx('./figures_and_tables/table6_top_ratio_deviation_appendix.xlsx')
+
+#hist(nns_ratio_by_cueType$ratio, breaks = 30)
+# library(fitdistrplus)
+# 
+# nns_ratio_by_cueType$ratio = log(nns_ratio_by_cueType$ratio)
+# norm=fitdist(nns_ratio_by_cueType$ratio,"lognormal")
+# gamma=fitdist(nns_ratio_by_cueType$ratio,"gamma")
+# 
+# cdf.1=cdfcomp(list(norm), xlogscale=F, ylogscale=F, main="",
+#               legendtext = c("Normal"),fitcol = c("red", "grey"), plotstyle ="ggplot")+
+#   geom_line(size=1.2)+
+#   xlab("# drupas")+
+#   theme(axis.title=element_text(size=15),
+#         axis.text = element_text(size=12),
+#         legend.position = c(0.25,0.85),
+#         legend.text=element_text(size=10))
+# qq.1=qqcomp(list(norm,gamma), main="",fitcol = c("red", "grey"), plotstyle ="ggplot")+
+#   geom_line(size=1.2)+
+#   theme_bw()+
+#   theme(axis.title=element_text(size=15),
+#         axis.text = element_text(size=12),
+#         legend.position ="none")
+
+m_nns_ratio <- glmer(ratio ~ cue.type*group +(1 |dimension), nns_ratio_by_cueType, family = 'Gamma')
+summary(m_nns_ratio)
+
+drop_m_nns_ratio = drop1(m_nns_ratio, test = 'Chisq')
+
+
+#Comparisons
+comp <- emmeans::emmeans(m_nns_ratio,  ~cue.type|group)
+contrast_nns_ratio = as.data.frame(pairs(comp, type = 'response'))
+plot(comp, comparisons = TRUE)
+
+
+#NNS ratio plot
+nns_ratio_total <- read.csv('../data/SWOW/output/nns_ratio.SWOW-RP.csv', encoding = 'UTF-8') %>% 
+  mutate(absdev = abs(1 -ratio)) %>% 
+  arrange(-absdev) %>%
+  group_by(dimension) %>% 
+  mutate(nn_id = row_number()) %>% 
+  left_join(translation_with_nns, by = c('nn' = 'cue')) %>% 
+  filter(dimension %in% c('cepa', 'inmunidad', 'ensayo')) %>%
+  mutate(dimension = replace(dimension, dimension == 'ensayo', 'trial')) %>% 
+  mutate(dimension = replace(dimension, dimension == 'inmunidad', 'immunity')) %>% 
+  mutate(dimension = replace(dimension, dimension == 'cepa', 'strain')) %>% 
+  mutate(group = factor(group, 
+                        levels = c('precovid', 'covid', 'shared'),
+                        labels = c('Precovid', 'Covid', 'shared'))) %>% 
+  mutate(tag = ifelse(dimension == 'strain', 'A.',
+                      ifelse(dimension == 'immunity', 'B.', 'C.')))
+
+
+dimensions <- unique(nns_ratio_total$dimension)
+for (word in dimensions) {
+  nns_ratio <- nns_ratio_total %>%
+    filter(dimension == word)
+  plot <- ggplot(nns_ratio) +
+    geom_text(
+      aes(x = nn_id, y = ratio, label = EN),
+      data = nns_ratio,
+      parse = TRUE,
+      hjust = if_else(nns_ratio$ratio > 1,-0.2, 1.2),
+      vjust = 0.25,
+      size = 4.5
+    ) +
+    annotate(geom = "text", y = c(0.5,1.5), x = c(-3,-3),
+             label=c("more similar\nin precovid", "more similar\nin covid"), size = 3.5) +
+    scale_color_manual(values = c("#00BFC4", "#F8766D","#7CAE00","#C77CFF")) +
+    geom_segment(aes(x=nn_id, xend=nn_id, y=1, yend=ratio), color="grey") + 
+    geom_hline(
+      yintercept = 1,
+      colour = 'black',
+      linetype = "dashed",
+      size = 0.5
+    )+
+    geom_point(
+      aes(
+        x = nn_id,
+        y = ratio,
+        color = group
+        #shape = group
+      ),
+      data = nns_ratio,
+      size = 2
+    ) +
+    ylim(min(nns_ratio$ratio) - 0.5, max(nns_ratio$ratio) + 0.5) +
+   # xlim(1,length(nns_ratio$nn_id)) +
+    xlab('neighbor rank') +
+    ggtitle(word) +
+    labs(tag = nns_ratio$tag) +
+    ylab("cosine similarity ratio (Covid/Precovid)") +
+    theme(
+      panel.background = element_blank(),
+      plot.title = element_text(
+        size = 20,
+        hjust = 0.5,
+        color = 'black'
+      ),
+      plot.tag = element_text(
+        size = 22,
+        #hjust = 0.5,
+        margin = margin(
+          t = 0,
+          r = 0,
+          b = 0,
+          l = 15
+        )
+      ),
+      axis.text.x = element_text(size = 12),
+      axis.text.y = element_text(size = 12),
+      axis.title.y = element_text(
+        size = 16,
+        margin = margin(
+          t = 0,
+          r = 15,
+          b = 0,
+          l = 15
+        )
+      ),
+      axis.title.x = element_text(
+        size = 16,
+        margin = margin(
+          t = 15,
+          r = 0,
+          b = 15,
+          l = 0
+        )
+      ),
+      legend.text = element_text(size = 16),
+      legend.title = element_blank(),
+      legend.key = element_blank(),
+      legend.position = "top",
+      legend.spacing.x = unit(0.25, 'cm'),
+      plot.margin = unit(c(1, 1, 0, 0), "cm")
+    ) +
+    coord_flip()  +
+    scale_x_reverse(breaks = c(35, 30,25, 20,15, 10,5, 1))
+  print(plot)
+  ggsave(paste0('./figures_and_tables/nns_ratio_', word, '.png'),
+         width = 14,
+         height = 8)
+}
+
+
+```
+
+
+```{r, echo=FALSE, message=F, warning=F}
+
+data.file           = '../data/SWOW/output/semanticSimilarityAnalysis_subset.SWOW-RP.csv'
+data.file_permutations           = '../data/SWOW/output/semanticSimilarityAnalysis_permutation_dimensions.SWOW-RP.csv'
+
+
+## For ensayo
+rating_1 = c('writing', 'play')
+rating_7 = c('test', 'experiment')
+ensayo = data.frame(rating_1, rating_7)
+
+## For cepa
+rating_1 = c('vine', 'plant')
+rating_7 = c('organism', 'virus')
+cepa = data.frame(rating_1, rating_7)
+
+## For inmunidad
+rating_1 = c('parliamentary', 'diplomatic')
+rating_7 = c('resistance', 'microorganism')
+inmunidad = data.frame(rating_1, rating_7)
+
+semantic_similarity_analysis              = read.csv(data.file, encoding = 'UTF-8') %>% 
+  mutate(cov.time = replace(cov.time, cov.time == 'covid', 'Covid')) %>% 
+  mutate(cov.time = replace(cov.time, cov.time == 'precovid', 'Precovid')) %>% 
+  mutate(dim.type = 'original',
+         permutation_n = 0) %>% 
+  select(-cue.type)
+
+semantic_similarity_analysis_permutations              = read.csv(data.file_permutations, encoding = 'UTF-8')%>% 
+  mutate(cov.time = replace(cov.time, cov.time == 'covid', 'Covid')) %>% 
+  mutate(cov.time = replace(cov.time, cov.time == 'precovid', 'Precovid')) %>% 
+  mutate('dim.type' = 'permutation') 
+
+semantic_similarity_analysis = semantic_similarity_analysis %>% 
+  bind_rows(semantic_similarity_analysis_permutations)
+
+semantic_similarity_analysis$cov.time <- factor(semantic_similarity_analysis$cov.time, levels = c("Precovid", "Covid"))
+
+# Permutation test
+dimensions = c('ensayo', 'cepa', 'inmunidad')
+
+# Original cues
+for (dimension in dimensions) {
+  diff_dimension_original <- semantic_similarity_analysis %>% 
+    filter(cue == dimension,
+           dim.type == 'original') %>% 
+    group_by(paradigm_word_rating) %>% 
+    select(!!dimension) %>% 
+    rename('dim' = !!dimension) %>% 
+    summarise(diff = diff(dim))
+  
+  diff_dimension_original = diff(diff_dimension_original$diff)
+  
+  # Control cues
+  diff_dimension_permutation <- semantic_similarity_analysis %>% 
+    filter(cue == dimension,
+           dim.type == 'permutation') %>% 
+    group_by(permutation_n, paradigm_word_rating)  %>% 
+    select(!!dimension) %>% 
+    rename('dim' = !!dimension) %>% 
+    summarise(diff_covtime = diff(dim)) %>% 
+    group_by(permutation_n) %>% 
+    summarise(diff_rating = diff(diff_covtime)) %>% 
+    pull(diff_rating)
+  
+  pval <- sum(abs(diff_dimension_permutation) >= abs(diff_dimension_original))/(length(diff_dimension_permutation))
+  
+  assign(paste0('pval_', dimension, '_permutation'), pval)
+  
+}
+
+# Plot for each dimension
+
+dimensions_en = list(ensayo = 'trial', 
+                     cepa = 'strain', 
+                     inmunidad = 'immunity'
+                     )
+
+for (dimension in dimensions) {
+  semantic_similarity_analysis_dimension = semantic_similarity_analysis %>%
+    filter(dim.type == 'original') %>% 
+    select(cue, cov.time, paradigm_word_rating, !!dimension) %>% 
+    filter(cue == dimension) %>% 
+    pivot_wider(names_from = paradigm_word_rating, values_from = !!dimension) 
+  semantic_similarity_analysis_dimension$dimensions_en = dimensions_en[[dimension]]
+
+
+  p1 <-
+    ggplot(semantic_similarity_analysis_dimension,
+           aes(x = rating_1_k, 
+               y = rating_7_k,
+               color = cov.time))  +
+    geom_point() +
+    geom_path(
+      arrow = arrow(
+        length = unit(0.1, "cm"),
+        #ends = "first",
+        type = "closed"
+      ),
+      color = 'gray38'
+    )  +
+    theme_apa(base_size = 12) +
+    theme(plot.title = element_text(),
+          axis.title = element_text(hjust = 1),
+          text = element_text(family = 'serif')
+          ) +
+    geom_text(aes(label = dimensions_en),
+              #vjust=0.5,
+              hjust=0,
+              #aes(label = cue),
+              size = 3.2,
+              #color = 'black',
+              nudge_x = max(semantic_similarity_analysis_dimension$rating_1_k)*0.09) +
+    labs(
+      color = 'Time period',
+      x = paste(get(dimension)$rating_1[1],
+                get(dimension)$rating_1[2], sep = ','),
+      y = paste(get(dimension)$rating_7[1],
+                get(dimension)$rating_7[2], sep = ','),
+      title = ''
+    )  +
+    coord_fixed() +
+    scale_color_manual(values = c("#00BFC4", "#F8766D"))+
+    scale_x_continuous(limits=c(0, 1),
+                       breaks=seq(0,1,0.2))+
+    scale_y_continuous(limits=c(0, 0.8),
+                       breaks=seq(0,0.8,0.2))
+  
+  
+  assign(paste0('plot_', dimension),p1)
+  ggsave(paste0('./figures_and_tables/semantic_similarity_', dimension, '.png'), width = 5, height = 3.5)
+  
+  
+}
+
+library(ggpubr)
+plot_all_dimensions <- ggarrange(plot_cepa, plot_inmunidad, plot_ensayo,
+                    labels = c("A", "B", "C"),
+                    label.x = 0,
+                    ncol = 2, nrow = 2,
+                    common.legend = TRUE, legend = "bottom")
+ggsave('./figures_and_tables/semantic_similarity_all_dimensions.png',
+       width = 5.5,
+       heigh = 6)
+```
+
+
+# Appendix   
+
+```{r, echo = F, message=F, warning=F, fig.pos='H'}
+# Create table
+cuesPropertiesByType_appendixTable = cuesPropertiesByType %>% 
+  rename('Cue type' = cue.type,
+         'Frequency' = frq,
+         'Imageability' = img,
+         'Concreteness' = con,
+         'Familiarity' = fam) %>% 
+  select(-n) %>% 
+  mutate(across(2:5, round, 1))%>% 
+  as_tibble() %>% 
+  write_xlsx('./figures_and_tables/table3_targetCues_appendix.xlsx')
+
+```
