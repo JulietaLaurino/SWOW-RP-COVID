@@ -72,9 +72,9 @@ library('tidyverse')
 library('igraph')
 
 
-source('./importDataFunctions.R')
-source('./networkFunctions.R')
-source('./similarityFunctions.R')
+source('../functions/importDataFunctions.R')
+#source('./networkFunctions.R')
+source('../functions/similarityFunctions.R')
 
 
 # Construct similarity matrices for SWOW based on the primary (R1) responses
@@ -84,9 +84,9 @@ source('./similarityFunctions.R')
 alpha = 0.75
 
 # Load the data
-dataFile.SWOW       = './SWOW-RP.R60_covid.csv'
+dataFile.SWOW       = '../data/SWOW/output/SWOW-RP.R60_covid.csv'
 SWOW.R123             = importDataSWOW(dataFile.SWOW,'R123')
-targetCues       = read.csv('./targetCues.csv', encoding = 'UTF-8') 
+targetCues       = read.csv('./data/SWOW/raw/targetCues.csv', encoding = 'UTF-8') 
 
 SWOW.R123             = SWOW.R123 %>% 
   left_join(targetCues) %>%
@@ -113,12 +113,12 @@ G$R123$RW$precovid          = weightMatrix(SWOW.R123_precovid,'RW',alpha)
 G$R123$RW$covid             = weightMatrix(SWOW.R123_covid,'RW',alpha)
 toc()
 
-write.csv(as.matrix(G$R123$RW$precovid),'./output/G_precovid_SWOW-RP.RW.A75.R123.csv', fileEncoding = 'UTF-8')
-write.csv(as.matrix(G$R123$RW$covid),'./output/G_covid_SWOW-RP.RW.A75.R123.csv', fileEncoding = 'UTF-8')
+write.csv(as.matrix(G$R123$RW$precovid),'../data/SWOW/output/G_precovid_SWOW-RP.RW.A75.R123.csv', fileEncoding = 'UTF-8')
+write.csv(as.matrix(G$R123$RW$covid),'../data/SWOW/output/G_covid_SWOW-RP.RW.A75.R123.csv', fileEncoding = 'UTF-8')
 
 # Compute the cosine similarity matrix 
 S_precovid = cosineMatrix(G$R123$RW$precovid)
 S_covid = cosineMatrix(G$R123$RW$covid)
 
-write.csv(S_precovid,'./output/S_precovid_SWOW-RP.RW.A75.R123.csv')
-write.csv(S_covid,'./output/S_covid_SWOW-RP.RW.A75.R123.csv')
+write.csv(S_precovid,'../data/SWOW/output/S_precovid_SWOW-RP.RW.A75.R123.csv')
+write.csv(S_covid,'../data/SWOW/output/S_covid_SWOW-RP.RW.A75.R123.csv')

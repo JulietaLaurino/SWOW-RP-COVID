@@ -1,4 +1,7 @@
 # Description:
+
+# Calculate the ratio of Covid to Precovid similarities between each dimension and 
+# their nearest neighbors in each period.
 # Calculate words' dimensions scores by using the Orientation towards Paradigm Words
 # extrapolation method. This method predicts a word's dimension using that word’s
 # similarity towards certain paradigm words (words commonly used to describe extreme
@@ -10,12 +13,12 @@
 
 require('tidyverse')
 library('tictoc')
-source('./semanticSimilarityAnalysisFunctions.R')
+source('../functions/semanticSimilarityAnalysisFunctions.R')
 
 
 tic()
-data.file_precovid           = './output/S_precovid_SWOW-RP.RW.A75.R123.csv'
-data.file_covid              = './output/S_covid_SWOW-RP.RW.A75.R123.csv'
+data.file_precovid           = '../data/SWOW/output/S_precovid_SWOW-RP.RW.A75.R123.csv'
+data.file_covid              = '../data/SWOW/output/S_covid_SWOW-RP.RW.A75.R123.csv'
 
 # Response frequencies for SWOW-EN R123
 
@@ -23,7 +26,42 @@ S_precovid              = read.csv(data.file_precovid, encoding = 'UTF-8')%>%
   rename(cue = X)
 S_covid                 = read.csv(data.file_covid, encoding = 'UTF-8') %>%
   rename(cue = X)
-targetCues  = read.csv('./targetCues.csv', encoding = 'UTF-8') 
+targetCues  = read.csv('../data/SWOW/raw/targetCues.csv', encoding = 'UTF-8') 
+dimensions = c('ensayo','cepa', 'inmunidad')
+
+# nns_ratio----
+
+k = 20
+
+nns_ratio = data.frame(nn = character(),
+                       ratio = integer(),
+                       dimension = character(),
+                       nn_id = character())
+for (dimension in dimensions) {
+  nn_precovid <- getKNeighbors(S_precovid, dimension, k)
+  nn_covid <- getKNeighbors(S_covid, dimension, k)
+  union_nns <- union(nn_precovid, nn_covid)
+  union_nns <- union_nns[union_nns %in% names(S_precovid) & union_nns %in% names(S_covid)]
+  s_precovid <- S_precovid %>% filter(cue == dimension) %>% select(any_of(union_nns))
+  s_covid <- S_covid %>% filter(cue == dimension) %>% select(any_of(union_nns))
+  this_nns_ratio <- s_covid / s_precovid
+  this_nns_ratio <- this_nns_ratio %>%
+    pivot_longer(names_to = 'nn',
+                 values_to = 'ratio',
+                 cols = everything()) %>%
+    mutate(dimension = dimension,
+           nn_id = as.character(row_number()),
+           group = ifelse(nn %in% nn_precovid & nn %in% nn_covid, 'shared',
+                          ifelse(nn %in% nn_precovid & !(nn %in% nn_covid), 'precovid',
+                                 'covid')))
+  nns_ratio <- bind_rows(nns_ratio, this_nns_ratio)
+}
+
+toc()
+
+write.csv(nns_ratio, '../data/SWOW/output/nns_ratio.SWOW-RP.csv', row.names = F)
+# 
+
 
 # Orientation towards Paradigm Words method ----
 # Create variables that contain the paradigm words
@@ -44,10 +82,7 @@ rating_7 = c('prueba', 'experimento')
 ensayo = data.frame(rating_1, rating_7)
 
 
-dimensions = c('ensayo','cepa', 'inmunidad')
-
-
-# First approach: A target word’s final score as the sum of a word’s similarity towards
+# A target word’s final score as the sum of a word’s similarity towards
 # rating_7 paradigm words minus the sum of its similarity towards rating_1 words.
 
 for (dimension in dimensions) {
@@ -77,7 +112,7 @@ for (dimension in dimensions) {
     filter(complete.cases(paradigm_word_rating))
 }
 
-write.csv(semantic_similarity_analysis, './output/semanticSimilarityAnalysis_subset.SWOW-RP.csv', row.names = F)
+write.csv(semantic_similarity_analysis, '../data/SWOW/output/semanticSimilarityAnalysis_subset.SWOW-RP.csv', row.names = F)
 
 
 # Permutation test----
@@ -188,7 +223,7 @@ semantic_similarity_analysis_permutation = semantic_similarity_analysis_permutat
   full_join(semantic_similarity_analysis_permutation_cepa) %>% 
   full_join(semantic_similarity_analysis_permutation_inmunidad)
 
-write.csv(semantic_similarity_analysis_permutation, './output/semanticSimilarityAnalysis_permutation2_dimensions.SWOW-RP.csv', row.names = F)
+write.csv(semantic_similarity_analysis_permutation, '../data/SWOW/output/semanticSimilarityAnalysis_permutation_dimensions.SWOW-RP.csv', row.names = F)
 
 # Save random pairs
 random_pairs_cepa = list(rating_1 = get('random_pairs_cepa_rating_1'),
@@ -203,40 +238,5 @@ random_pairs_inmunidad = list(rating_1 = get('random_pairs_inmunidad_rating_1'),
 random_pairs = list(cepa = random_pairs_cepa,
                     ensayo = random_pairs_ensayo,
                     inmunidad = random_pairs_inmunidad)
-saveRDS(random_pairs, file="./output/permutation_random_pairs.RData")
+saveRDS(random_pairs, file="../data/SWOW/output/permutation_random_pairs.RData")
 
-# nns_ratio----
-
-k = 20
-#dimensions = c('alcohol','cepa', 'inmunidad')
-
-nns_ratio = data.frame(nn = character(),
-                       ratio = integer(),
-                       dimension = character(),
-                       nn_id = character())
-for (dimension in dimensions) {
-  nn_precovid <- getKNeighbors(S_precovid, dimension, k)
-  nn_covid <- getKNeighbors(S_covid, dimension, k)
-  union_nns <- union(nn_precovid, nn_covid)
-  union_nns <- union_nns[union_nns %in% names(S_precovid) & union_nns %in% names(S_covid)]
-  s_precovid <- S_precovid %>% filter(cue == dimension) %>% select(any_of(union_nns))
-  s_covid <- S_covid %>% filter(cue == dimension) %>% select(any_of(union_nns))
-  this_nns_ratio <- s_covid / s_precovid
-  this_nns_ratio <- this_nns_ratio %>%
-    pivot_longer(names_to = 'nn',
-                 values_to = 'ratio',
-                 cols = everything()) %>%
-    mutate(dimension = dimension,
-           nn_id = as.character(row_number()),
-           group = ifelse(nn %in% nn_precovid & nn %in% nn_covid, 'shared',
-                          ifelse(nn %in% nn_precovid & !(nn %in% nn_covid), 'precovid',
-                                 'covid')))
-  nns_ratio <- bind_rows(nns_ratio, this_nns_ratio)
-}
-
-toc()
-
-#write.csv(nns_ratio, './output/nns_ratio.SWOWES-UY.csv', row.names = F)
-write.csv(nns_ratio, './output/nns_ratio.SWOW-RP.csv', row.names = F)
-# 
-# 
