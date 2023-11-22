@@ -11,5 +11,7 @@ To reproduce the analyses you should:
 2. Download the raw data CSV file from [here](https://www.dropbox.com/s/5wia0wtw57cq5oi/SWOW-RP.complete_covid.csv?dl=0) and place it under the [data/SWOW/raw]([data/SWOW/raw](https://github.com/JulietaLaurino/SWOW-RP-COVID/tree/main/data/SWOW/raw)) folder in the cloned repo.
 3. Open the R Project 'SWOW-RP-COVID.Rproj' located in the [scripts](https://github.com/JulietaLaurino/SWOW-RP-COVID/tree/main/scripts) folder and open 'analysis.R'. You should be able to run all the code from line 18 (`source('preprocessData.R')`) on.
 
+Please note that data themselves are licensed under Creative Commons Attribution-NonCommercial-NoDerivs 3.0 Unported License. They cannot be redistributed or used for commercial purposes.
+
 
 
